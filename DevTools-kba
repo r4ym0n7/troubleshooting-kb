@@ -1,0 +1,57 @@
+Open DevTools with F12 or Ctrl+Shift+I (Cmd+Option+I on Mac).
+
+1. Console: find errors first
+
+Red errors show JavaScript exceptions, failed resource loads, and CORS or CSP violations, each with a file and line link.
+Turn on Preserve log so messages survive page reloads and redirects.
+Filter by level (Errors, Warnings) or search text to cut noise.
+
+2. Network: the main tool for most web app issues
+
+Reload with the tab open and Disable cache checked, to rule out stale assets.
+Sort or filter by Fetch/XHR to see API calls.
+Click a request to check:
+Status code: 4xx means client or auth problems (401/403 auth, 404 wrong path, 422/400 bad payload), 5xx means server errors.
+Headers: request URL and method, Authorization, Content-Type, Origin, CORS response headers, cache headers.
+Payload: what the client actually sent.
+Response/Preview: the error body, which often names the real cause.
+Timing: a long “waiting for server response” points to the backend, and a long “content download” points to payload size.
+Right-click a request and choose Copy > Copy as cURL to replay it in a terminal or hand it to engineering. Remove tokens and cookies before sharing.
+Throttling (for example “Slow 4G” or “Offline”) reproduces slow-network and failure behavior.
+
+3. Sources: debug JavaScript
+
+Open a file, click a line number to set a breakpoint, and trigger the action.
+Step with F10 (over), F11 (into), and Shift+F11 (out), and watch Scope and Watch values.
+Use Pause on exceptions (the pause icon) to stop at the failing line.
+Event listener breakpoints and XHR/fetch breakpoints help when you don’t know where the code lives.
+
+4. Elements: HTML and CSS problems
+
+Inspect an element to see its computed styles, box model, and which rule wins.
+Toggle or edit styles live, and check for display: none, overflow, z-index, or a parent clipping content.
+Use Break on > subtree/attribute modifications to catch what script changes an element.
+
+5. Application: storage and auth state
+
+Cookies, Local/Session Storage, IndexedDB: check whether the token or session value exists, and whether cookie flags (Secure, HttpOnly, SameSite, expiry) explain a login problem.
+Service Workers and Cache Storage: use Unregister or Clear site data when a page keeps showing old code.
+
+6. Performance and Lighthouse
+
+Performance records a page load or interaction to find long tasks and layout thrash.
+Lighthouse runs quick audits for speed, accessibility, and best practices.
+
+A simple troubleshooting order
+
+Reproduce the problem with the Console and Network tabs open.
+Check the Console for errors.
+Find the failing or slow request in Network and read its status, request, and response.
+Compare what the client sent with what the API expects.
+If it’s a front-end logic issue, set a breakpoint in Sources.
+Rule out cache and storage by hard-reloading or using an Incognito window.
+
+Security notes
+
+HAR exports, cURL copies, and screenshots can contain session tokens, cookies, and personal data. Redact them before sharing, and never put them in a public repo.
+Only test sites and apps you have permission to examine.
