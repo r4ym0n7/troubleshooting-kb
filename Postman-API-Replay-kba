@@ -1,0 +1,122 @@
+# Reading and replaying API requests with Postman
+
+**Applies to:** REST APIs, Postman (desktop or web), Chrome/Edge/Firefox DevTools
+**Audience:** Support, QA, and junior engineers
+**Last updated:** [date]
+
+*Menu names can differ slightly between Postman versions.*
+
+## Symptoms
+
+- A feature fails in the web application and you suspect the API call behind it.
+- You need to reproduce an error outside the browser to see whether the problem is in the request, the server, or the front end.
+- You need to test a fix, or send a clean example to engineering.
+
+## Cause
+
+Browsers hide a lot: cached data, cookies, extensions, and front-end code can all change what is sent. Replaying the exact request in Postman isolates the API from the browser so you can change one thing at a time.
+
+## Resolution
+
+### Part 1: Capture the request from the browser
+
+1. Open DevTools (**F12**) and go to the **Network** tab. Check **Preserve log**.
+2. Filter by **Fetch/XHR** and reproduce the problem.
+3. Find the failing request. Note the method, URL, status code, request headers, payload, and response body.
+4. Right-click the request and choose **Copy > Copy as cURL**.
+
+### Part 2: Import it into Postman
+
+1. In Postman, choose **Import** (top left), then **Raw text** (or paste directly into the import box).
+2. Paste the copied cURL text and import.
+3. Postman builds a request with the method, URL, headers, and body already filled in.
+4. Before sending, read through the **Params**, **Authorization**, **Headers**, and **Body** tabs and check them against what the browser sent.
+
+**Alternatively**, build the request by hand:
+1. Click **New > HTTP**.
+2. Pick the method (GET, POST, PUT, PATCH, DELETE) and enter the URL.
+3. Add query parameters in **Params**.
+4. Add headers in **Headers** (for example `Content-Type: application/json`).
+5. For POST, PUT, or PATCH, open **Body**, choose **raw > JSON**, and paste the payload.
+
+### Part 3: Handle authentication safely
+
+1. Open the **Authorization** tab and choose the type (commonly **Bearer Token** or **API Key**).
+2. Don't type the token straight into the request. Instead, create an **Environment** (for example "Test") and add a variable such as `token`.
+3. Reference it in the request as `{{token}}`, and the base URL as `{{base_url}}`.
+4. Keep secrets in the **Current value** column and mark the variable as type **secret**. The **Initial value** column can be synced to the cloud or shared with a team, so leave it empty for secrets.
+5. Select the environment in the top-right dropdown.
+
+### Part 4: Send and read the response
+
+1. Click **Send**.
+2. Read the response:
+   - **Status** (code and text), **Time**, and **Size** appear above the response.
+   - **Body** has **Pretty**, **Raw**, and **Preview** views. Pretty formats JSON for reading.
+   - **Headers** show response headers, such as `Content-Type`, `WWW-Authenticate`, caching, and request ID headers.
+   - **Cookies** shows cookies set by the server.
+3. Compare the status code and body with what the browser showed. Use the HTTP status codes article for next steps.
+
+### Part 5: Replay and isolate the cause
+
+Change **one thing at a time** and resend, so you know what made the difference:
+
+| Test | What it tells you |
+|---|---|
+| Send the unchanged request | Whether the problem reproduces outside the browser |
+| Remove or refresh the token | Whether it's an authentication problem (401/403) |
+| Fix a field in the body | Whether the failure is a payload problem (400/422) |
+| Change the ID or path | Whether the resource or route is the problem (404) |
+| Remove an optional header or parameter | Whether a specific header or parameter triggers the failure |
+| Send a smaller request | Whether size or query load causes a timeout (504) |
+| Try a different environment | Whether the issue is specific to one environment |
+
+### Part 6: See exactly what was sent
+
+1. Open the **Postman Console** (**View > Show Postman Console**).
+2. Resend the request. The Console shows the final request that left Postman, including headers that were added automatically and any redirects.
+3. Use this to confirm that variables resolved correctly (for example, `{{base_url}}` became the right host).
+
+### Part 7: Save and organize it
+
+1. Click **Save** and put the request in a **Collection** named for the application or issue.
+2. Use a clear name, for example `POST /v1/items - returns 422 on missing name`.
+3. Click **Save Response > Save as example** to keep the failing response alongside the request.
+4. Add notes in the request **Description**: expected behavior, actual behavior, and date.
+
+### Part 8 (optional): Add a simple check
+
+In the **Tests** tab, add a short script that confirms the expected result:
+
+```javascript
+pm.test("Status is 200", function () {
+  pm.response.to.have.status(200);
+});
+
+pm.test("Response has an id", function () {
+  const body = pm.response.json();
+  pm.expect(body).to.have.property("id");
+});
+```
+
+After sending, the **Test Results** tab shows pass or fail. This lets you rerun the same request later to confirm a fix.
+
+## Verification
+
+- The request returns the expected status code and response body in Postman.
+- The same action succeeds in the application.
+- A saved example or test result documents the before and after.
+
+## Common problems
+
+- **Works in the browser, fails in Postman:** a cookie or header the browser adds is missing. Compare the request headers in DevTools with the **Headers** tab and the **Postman Console**.
+- **Fails in Postman, works in the browser:** check that the token is current, the environment is correct, and the body is valid JSON.
+- **CORS errors don't appear in Postman.** Postman isn't a browser and doesn't enforce CORS, so a request that works there can still fail in a browser for CORS reasons.
+- **SSL certificate errors:** investigate the certificate problem. Don't turn off SSL verification except in a test environment you control.
+- **Variables show as unresolved (red or text still in braces):** the right environment isn't selected, or the variable name has a typo.
+
+## Safety notes
+
+- Only replay requests against systems you own or are authorized to test.
+- Avoid replaying write requests (POST, PUT, PATCH, DELETE) against production. They can create duplicates or change real data. Use a test environment where possible.
+- Redact tokens, cookies, and personal or patient data from collections, screenshots, and anything you share. Don't publish Postman collections that contain real secrets or real customer data.
