@@ -1,0 +1,145 @@
+# HTTP status codes and how to remedy them
+
+**Applies to:** Web applications and REST APIs
+**Audience:** Support, QA, and junior engineers
+**Last updated:** [date]
+
+## Quick reference
+
+| Code | Meaning | Usual owner | First thing to check |
+|---|---|---|---|
+| 401 | Not authenticated | Client / auth | Is a valid, unexpired credential being sent? |
+| 403 | Authenticated but not allowed | Permissions / security rules | Role, scope, IP/WAF rules, CSRF |
+| 404 | Resource or route not found | Client / routing | URL, API version, ID, trailing slash, method |
+| 422 (or 400) | Request understood but invalid | Client / payload | Response body: which field failed validation |
+| 500 | Unhandled server error | Backend | Note the request ID and timestamp, then escalate |
+| 502 | Bad gateway | Proxy / upstream service | Is the upstream app down or returning an invalid response? |
+| 504 | Gateway timeout | Proxy / upstream service | Is the upstream app too slow? |
+
+Rule of thumb: **4xx means the request needs to change, 5xx means the server needs to change.**
+
+## 401 Unauthorized: "I don't know who you are"
+
+**Common causes**
+- No credential was sent (missing `Authorization` header or session cookie)
+- Expired or revoked token or session
+- Wrong header format (it should usually be `Authorization: Bearer <token>`)
+- Token issued for a different environment, tenant, or audience
+- Clock skew on a device or server, which breaks time-limited tokens
+
+**How to remedy**
+1. Sign in again or refresh the token.
+2. Confirm the credential is sent in the correct header and format.
+3. Confirm the token belongs to the same environment (test vs production) and tenant as the request.
+4. Check that the device and server clocks are correct.
+5. Look at the `WWW-Authenticate` response header, which often names the problem (for example `invalid_token`).
+
+## 403 Forbidden: "I know who you are, but you can't do this"
+
+**Common causes**
+- The user's role or permissions don't allow the action or resource
+- Missing OAuth scope
+- IP allow-list, geo-block, or web application firewall (WAF) rule blocked the request, often with an HTML block page instead of a JSON error
+- Missing or invalid CSRF token on a request that changes data
+- Account is disabled or read-only
+
+**How to remedy**
+1. Read the response body. A JSON message points to the application, and an HTML block page points to a WAF or gateway.
+2. Request the correct role, permission, or scope from the system owner.
+3. Test with another account that has a different role to confirm it's a permissions issue.
+4. If a firewall or WAF blocked it, ask its owner to review the rule. Don't bypass access controls.
+5. For CSRF errors, reload the page to get a fresh token and retry.
+
+**401 vs 403:** 401 means authentication failed or is missing. 403 means authentication worked but authorization failed.
+
+## 404 Not Found: "There is nothing at this address"
+
+**Common causes**
+- Typo, wrong path, or wrong API version (`/v1/` vs `/v2/`)
+- Wrong base URL or environment
+- The ID doesn't exist, was deleted, or belongs to another tenant
+- Wrong HTTP method, or a trailing-slash mismatch
+- The API deliberately returns 404 instead of 403 to avoid revealing that a resource exists
+
+**How to remedy**
+1. Compare the URL against the documentation, character by character.
+2. Confirm the API version and the environment.
+3. Confirm the record or resource exists and that you have access to it.
+4. Try a known-good ID to separate a bad route from a missing record.
+5. If a resource was deleted, restore it or update whatever still points to it.
+
+## 422 Unprocessable Entity (and 400 Bad Request): "I understood you, but the data is invalid"
+
+**Common causes**
+- Missing required field, wrong data type, bad date format, or value out of range
+- Malformed JSON (usually 400) or valid JSON that fails validation rules (usually 422)
+- Wrong `Content-Type` header (for example, JSON sent as `text/plain`)
+- Duplicate value in a field that must be unique
+
+**How to remedy**
+1. Read the response body. It usually names the failing field and the reason.
+2. Compare the request payload with the API schema or documentation.
+3. Fix the field, type, or format and resend.
+4. Confirm the `Content-Type` header matches the body format.
+5. For duplicates, change the value or update the existing record instead of creating a new one.
+
+## 500 Internal Server Error: "Something broke on the server"
+
+**Common causes**
+- Unhandled exception in application code
+- Failed database query or unavailable dependency
+- Bad deployment or configuration change
+
+**How to remedy**
+1. Retry once to see whether it's a one-time failure. Avoid repeatedly retrying requests that create or change data, since this can create duplicates.
+2. Try a minimal or simpler request to see whether specific input triggers it.
+3. Check whether it began after a deployment or a known outage.
+4. Collect the request ID or correlation ID (if present), the timestamp with timezone, the request, and the response, then escalate to engineering. The client usually can't fix a 500.
+
+## 502 Bad Gateway: "The middleman got a bad answer"
+
+A gateway, load balancer, reverse proxy, or CDN sits between the client and the application. It returned 502 because the **upstream** application gave an invalid response or the connection failed.
+
+**Common causes**
+- Application crashed or is restarting
+- Wrong upstream port or protocol mismatch
+- Connection refused or reset by the upstream service
+
+**How to remedy**
+1. Wait a minute and retry, since a restarting service often recovers on its own.
+2. Check the status page or monitoring dashboard for the upstream service.
+3. If it persists, report it to the team that owns the application, with timestamps and the affected URL.
+4. Owners should check that the application is running, the proxy points to the right host and port, and the application logs for crashes.
+
+## 503 Service Unavailable: "No one is available to answer"
+
+**Common causes:** overload, scheduled maintenance, or no healthy backend servers.
+
+**How to remedy:** check for announced maintenance, retry later with a pause between attempts, and report it if it lasts. Owners should check capacity, health checks, and backend status.
+
+## 504 Gateway Timeout: "The middleman gave up waiting"
+
+The gateway didn't get an answer from the upstream application in time.
+
+**Common causes**
+- Slow database query or heavy processing
+- Overloaded service
+- Gateway timeout set too low for a long-running operation
+
+**How to remedy**
+1. Retry once. If it's a one-time spike, it may succeed.
+2. Try a smaller request (fewer records, a narrower date range) to see whether size is the cause.
+3. Report it to the owning team with the time of the failure, the URL, and how long the request ran before failing.
+4. Owners should look for slow queries or overloaded resources, and consider raising the timeout or moving long operations to a background job.
+
+## Verification
+
+- The same action now returns a successful 2xx status.
+- The result appears in the application (record saved, page loads).
+- For intermittent errors, repeat the action several times over a few minutes.
+
+## Related articles
+
+- Troubleshooting web applications with browser DevTools
+- Fixing CORS errors
+- Troubleshooting TLS/SSL certificate errors
