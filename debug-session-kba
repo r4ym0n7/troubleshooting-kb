@@ -1,0 +1,114 @@
+# Debugging login and session problems: cookies, tokens, and SameSite flags
+
+**Applies to:** Web applications using cookie-based sessions or token-based (bearer/JWT) authentication; Chrome, Edge, Firefox
+**Audience:** Support, QA, and junior engineers
+**Last updated:** [date]
+
+## Symptoms
+
+- The user signs in successfully but is sent straight back to the login page (a login loop).
+- The user is logged out unexpectedly or at random.
+- Login works in one browser or device but not another.
+- Login only works after clearing cookies, or only in a private window.
+- The page loads but API calls return 401 or 403 right after login.
+- Login fails only when the app is embedded in another site (an iframe) or reached through single sign-on (SSO) from another domain.
+
+## Background: how the browser remembers you
+
+After login, the server gives the browser proof of identity, and the browser sends it back on later requests. It takes one of two common forms:
+
+- **Session cookie:** the server sends a `Set-Cookie` header, and the browser automatically returns it in the `Cookie` header.
+- **Token:** the app stores a token (for example a JWT) and sends it in an `Authorization: Bearer <token>` header on API calls.
+
+Most login and session failures come from the proof not being **stored**, **sent**, or **accepted**.
+
+### Cookie attributes that matter
+
+| Attribute | What it does | Common failure |
+|---|---|---|
+| `Secure` | Cookie is only sent over HTTPS | Not set or not returned when the site is loaded over HTTP |
+| `HttpOnly` | JavaScript can't read the cookie | Not a cause of failure, but explains why scripts can't see it |
+| `SameSite=Strict` | Sent only for same-site requests | Login breaks after following a link from another site |
+| `SameSite=Lax` | Sent for same-site requests and top-level navigations | Blocked on cross-site POSTs, iframes, and background requests |
+| `SameSite=None` | Sent in cross-site contexts; requires `Secure` | Rejected if `Secure` is missing |
+| `Domain` | Which hosts receive the cookie | `www.example.com` vs `example.com` vs subdomains mismatch |
+| `Path` | Which URL paths receive it | Cookie set for `/app` but sent to `/api` |
+| `Expires` / `Max-Age` | How long it lasts | Expired immediately or very short lifetime |
+
+Modern browsers treat a cookie with **no** SameSite attribute as `Lax`, so apps that relied on the old default can break in cross-site flows.
+
+## Resolution
+
+### Step 1: Rule out the basics
+
+1. Retry in a **private/incognito window** with extensions disabled. This avoids stale cookies and most extension interference.
+2. Try a second browser. If it works there, the problem is browser-specific (settings, extensions, or stored data).
+3. Check the device **date, time, and time zone**. Wrong clocks cause expired-looking tokens and cookies.
+4. Check whether the browser is blocking cookies or third-party cookies for this site, and whether a privacy tool, tracking protection, or corporate policy is active.
+5. Confirm the user is on the correct address and HTTPS, and not switching between `http://`, `https://`, `www`, and non-`www` versions of the site.
+
+### Step 2: Watch the login in DevTools
+
+1. Open DevTools (**F12**) and go to **Network**. Check **Preserve log**.
+2. Clear site data first: **Application > Storage > Clear site data**.
+3. Perform the login and watch the sequence of requests.
+4. Click the login request (usually a POST) and check:
+   - **Status:** a 200, or a 302 redirect after success.
+   - **Response headers:** look for `Set-Cookie`. If none appears, the server didn't issue a session cookie.
+   - In the **Cookies** tab of that request, look for warning icons. Chrome shows why a cookie was blocked (for example, "SameSite=None requires Secure").
+5. Click the next request after login and check its **request headers**: is the `Cookie` header present? If the server set a cookie but it isn't sent back, the browser rejected or filtered it.
+
+### Step 3: Inspect stored cookies and tokens
+
+1. Open **Application > Cookies** and select the site.
+2. Confirm the session cookie exists and check **Domain**, **Path**, **Expires**, **HttpOnly**, **Secure**, and **SameSite**.
+3. Open **Application > Local Storage** and **Session Storage** for token-based apps. Check whether a token is stored and whether it's cleared too early.
+4. For a token, check the **expiry** (`exp` claim in a JWT), **audience** (`aud`), and **issuer** (`iss`). Decode tokens locally or with a trusted tool. Never paste production tokens into unknown websites.
+
+### Step 4: Match the symptom to a cause
+
+| Symptom | Likely cause | Remedy |
+|---|---|---|
+| Login loop (redirects back to login) | Cookie not set, blocked, or not returned | Check `Set-Cookie` and the browser's blocked-cookie warning; fix `Secure`, `SameSite`, `Domain`, or `Path` |
+| Cookie warning: "SameSite=None requires Secure" | `SameSite=None` set without `Secure` | Add `Secure` and serve over HTTPS |
+| Works in same tab, fails from email link or another site | `SameSite=Strict` | Use `Lax` for the session cookie, or redirect through a same-site landing page |
+| Fails only inside an iframe or embedded widget | Cross-site context blocks `Lax`/`Strict` cookies, or third-party cookies are blocked | Use `SameSite=None; Secure` where appropriate, or avoid third-party cookies with another design (such as redirect-based login) |
+| Cookie set but not sent to API | `Domain` or `Path` mismatch, or API is on another site | Align `Domain`/`Path`, or send the token in an `Authorization` header |
+| Works on `www`, fails on apex domain (or reverse) | Cookie scoped to one host | Set `Domain` to cover both, or redirect everyone to one canonical host |
+| Logged out at random | Server restarts, multiple servers without a shared session store, or session timeout too short | Use a shared session store or sticky sessions; review timeout settings |
+| 401 right after login with a token | Token expired, wrong audience, wrong environment, or clock skew | Refresh the token, correct the audience/issuer, sync clocks |
+| Logout after a set interval (for example 15 min) | Access token expired and refresh failed | Check the refresh token flow and its expiry; look at the refresh request's status |
+| Works after clearing cookies | Stale, oversized, or conflicting cookies | Clear site cookies; check for duplicate cookies with different `Path` or `Domain` values |
+| 400 or 431 errors (request header too large) | Too many or too large cookies | Clear cookies; have developers reduce cookie size |
+| Login fails only on HTTP | `Secure` cookie isn't stored on a non-HTTPS page | Use HTTPS |
+| SSO redirect fails or loops | Redirect URI mismatch, expired `state`, or cookies lost in the redirect chain | Compare the redirect URI with the configured one; retry from a fresh tab; check cookie settings on the callback |
+
+### Step 5: Send it to the right owner
+
+- **User-side fixes** (clear site data, correct the time, disable an extension, allow cookies): try these first.
+- **Application or server fixes** (cookie flags, domain scope, session store, token lifetimes, redirect URIs): escalate to engineering with:
+  - The login request's `Set-Cookie` header (with the value redacted)
+  - The browser, version, and any blocked-cookie warning
+  - Domain and URLs involved, and whether an iframe or SSO is part of the flow
+  - Time of the failure, with time zone
+
+## Verification
+
+- After login, the session cookie or token appears in **Application** with the expected attributes.
+- The next request includes the `Cookie` or `Authorization` header and returns a successful status.
+- The user stays signed in across page reloads and for the expected session length.
+- The fix works in a clean private window and a second browser.
+
+## Safety notes
+
+- Session cookies and tokens are as sensitive as passwords. Anyone who has one can act as that user.
+- Redact cookie values, tokens, and HAR files before sharing them, and don't commit them to a public repo.
+- Don't paste real tokens into online decoders.
+- Test with test accounts in test environments, and only on systems you're authorized to test.
+
+## Related articles
+
+- Diagnosing HTTP status codes
+- Troubleshooting web applications with browser DevTools
+- Reading and replaying API requests with Postman
+- Fixing CORS errors
